@@ -5,8 +5,16 @@ import (
 	"net/http"
 )
 
+// HTTPHandlerFunc is an HTTP handler that returns an error to its middleware.
 type HTTPHandlerFunc func(http.ResponseWriter, *http.Request) error
 
+// NewHTTPMiddleware creates middleware that logs errors returned by HTTPHandlerFunc.
+//
+// The middleware logs only non-nil returned errors using [slog.Logger.ErrorContext].
+// Details attached to the error with [With] or [WithMany] are added as top-level
+// structured log fields. If logger is nil, [slog.Default] is used.
+//
+// Panics are not recovered or logged by this middleware.
 func NewHTTPMiddleware(logger *slog.Logger) func(HTTPHandlerFunc) http.HandlerFunc {
 	if logger == nil {
 		logger = slog.Default()
