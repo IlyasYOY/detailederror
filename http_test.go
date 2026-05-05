@@ -1,7 +1,7 @@
 package detailederror_test
 
 import (
-	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -17,39 +17,39 @@ type capturedHandler struct {
 }
 
 type capturedRecord struct {
-	msg   string
 	attrs map[string]string
+	msg   string
 }
 
-func (c *capturedHandler) Enabled(context.Context, slog.Level) bool { return true }
-
-func (c *capturedHandler) Handle(_ context.Context, record slog.Record) error {
+func (c *capturedHandler) Write(p []byte) (int, error) {
+	var data map[string]string
+	if err := json.Unmarshal(p, &data); err != nil {
+		return 0, err
+	}
 	recordAttrs := make(map[string]string)
-	record.Attrs(func(attr slog.Attr) bool {
-		recordAttrs[attr.Key] = attr.Value.String()
-		return true
-	})
+	for k, v := range data {
+		if k == "time" || k == "level" || k == "msg" {
+			continue
+		}
+		recordAttrs[k] = v
+	}
 	c.records = append(c.records, capturedRecord{
-		msg:   record.Message,
+		msg:   data["msg"],
 		attrs: recordAttrs,
 	})
-	return nil
+	return len(p), nil
 }
-
-func (c *capturedHandler) WithAttrs(_ []slog.Attr) slog.Handler { return c }
-
-func (c *capturedHandler) WithGroup(_ string) slog.Handler { return c }
 
 func newTestLogger() (*slog.Logger, *capturedHandler) {
 	ch := &capturedHandler{}
-	return slog.New(ch), ch
+	return slog.New(slog.NewJSONHandler(ch, nil)), ch
 }
 
 func TestNewHTTPMiddleware_LogsErrorWithoutDetails(t *testing.T) {
 	logger, handler := newTestLogger()
 	middleware := detailederror.NewHTTPMiddleware(logger)
 	err := errors.New("http error")
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
 	rec := httptest.NewRecorder()
 	wrapped := middleware(func(_ http.ResponseWriter, _ *http.Request) error {
 		return err
@@ -73,7 +73,7 @@ func TestNewHTTPMiddleware_LogsOneDetail(t *testing.T) {
 	middleware := detailederror.NewHTTPMiddleware(logger)
 	err := errors.New("http error")
 	detailedErr := detailederror.With(err, "user", "ilya")
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
 	rec := httptest.NewRecorder()
 	wrapped := middleware(func(_ http.ResponseWriter, _ *http.Request) error {
 		return detailedErr
@@ -98,7 +98,7 @@ func TestNewHTTPMiddleware_LogsManyDetails(t *testing.T) {
 		"user1", "ilya1",
 		"user2", "ilya2",
 	)
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
 	rec := httptest.NewRecorder()
 	wrapped := middleware(func(_ http.ResponseWriter, _ *http.Request) error {
 		return detailedErr
@@ -120,7 +120,7 @@ func TestNewHTTPMiddleware_LogsManyDetails(t *testing.T) {
 func TestNewHTTPMiddleware_DoesNotLogOnNil(t *testing.T) {
 	logger, handler := newTestLogger()
 	middleware := detailederror.NewHTTPMiddleware(logger)
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
 	rec := httptest.NewRecorder()
 	wrapped := middleware(func(_ http.ResponseWriter, _ *http.Request) error { return nil })
 
@@ -134,7 +134,7 @@ func TestNewHTTPMiddleware_DoesNotLogOnNil(t *testing.T) {
 func TestNewHTTPMiddleware_DoesNotLogPanic(t *testing.T) {
 	logger, handler := newTestLogger()
 	middleware := detailederror.NewHTTPMiddleware(logger)
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", http.NoBody)
 	rec := httptest.NewRecorder()
 	wrapped := middleware(func(_ http.ResponseWriter, _ *http.Request) error {
 		panic("boom")

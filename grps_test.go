@@ -14,11 +14,13 @@ func TestNewGRPCUnaryServerInterceptor_LogsErrorWithoutDetails(t *testing.T) {
 	logger, handler := newTestLogger()
 	interceptor := detailederror.NewGRPCUnaryServerInterceptor(logger)
 	err := errors.New("grpc error")
-	_, gotErr := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, func(_ context.Context, _ any) (any, error) {
+	unaryHandler := func(_ context.Context, _ any) (any, error) {
 		return nil, err
-	})
+	}
 
-	if gotErr != err {
+	_, gotErr := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, unaryHandler)
+
+	if !errors.Is(gotErr, err) {
 		t.Fatalf("error = %v, want %v", gotErr, err)
 	}
 	if len(handler.records) != 1 {
@@ -37,11 +39,13 @@ func TestNewGRPCUnaryServerInterceptor_LogsOneDetail(t *testing.T) {
 	interceptor := detailederror.NewGRPCUnaryServerInterceptor(logger)
 	err := errors.New("grpc error")
 	detailedErr := detailederror.With(err, "user", "ilya")
-	_, gotErr := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, func(_ context.Context, _ any) (any, error) {
+	unaryHandler := func(_ context.Context, _ any) (any, error) {
 		return nil, detailedErr
-	})
+	}
 
-	if gotErr != detailedErr {
+	_, gotErr := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, unaryHandler)
+
+	if !errors.Is(gotErr, detailedErr) {
 		t.Fatalf("error = %v, want %v", gotErr, detailedErr)
 	}
 	if len(handler.records) != 1 {
@@ -61,11 +65,13 @@ func TestNewGRPCUnaryServerInterceptor_LogsManyDetails(t *testing.T) {
 		"user1", "ilya1",
 		"user2", "ilya2",
 	)
-	_, gotErr := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, func(_ context.Context, _ any) (any, error) {
+	unaryHandler := func(_ context.Context, _ any) (any, error) {
 		return nil, detailedErr
-	})
+	}
 
-	if gotErr != detailedErr {
+	_, gotErr := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, unaryHandler)
+
+	if !errors.Is(gotErr, detailedErr) {
 		t.Fatalf("error = %v, want %v", gotErr, detailedErr)
 	}
 	if len(handler.records) != 1 {
@@ -82,9 +88,11 @@ func TestNewGRPCUnaryServerInterceptor_LogsManyDetails(t *testing.T) {
 func TestNewGRPCUnaryServerInterceptor_DoesNotLogOnNil(t *testing.T) {
 	logger, handler := newTestLogger()
 	interceptor := detailederror.NewGRPCUnaryServerInterceptor(logger)
-	_, gotErr := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, func(_ context.Context, _ any) (any, error) {
+	unaryHandler := func(_ context.Context, _ any) (any, error) {
 		return "ok", nil
-	})
+	}
+
+	_, gotErr := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, unaryHandler)
 
 	if gotErr != nil {
 		t.Fatalf("error = %v, want nil", gotErr)
@@ -97,6 +105,9 @@ func TestNewGRPCUnaryServerInterceptor_DoesNotLogOnNil(t *testing.T) {
 func TestNewGRPCUnaryServerInterceptor_DoesNotLogPanic(t *testing.T) {
 	logger, handler := newTestLogger()
 	interceptor := detailederror.NewGRPCUnaryServerInterceptor(logger)
+	unaryHandler := func(_ context.Context, _ any) (any, error) {
+		panic("boom")
+	}
 	defer func() {
 		if r := recover(); r == nil {
 			t.Fatalf("panic was not propagated")
@@ -105,7 +116,8 @@ func TestNewGRPCUnaryServerInterceptor_DoesNotLogPanic(t *testing.T) {
 			t.Fatalf("records count = %d, want 0", len(handler.records))
 		}
 	}()
-	_, _ = interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, func(_ context.Context, _ any) (any, error) {
-		panic("boom")
-	})
+	_, err := interceptor(context.Background(), "request", &grpc.UnaryServerInfo{}, unaryHandler)
+	if err != nil {
+		t.Fatalf("error = %v, want nil", err)
+	}
 }
